@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -11,6 +12,10 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/spotahome/redis-operator/log"
+)
+
+const (
+	statefulVersionNumberName = "deployment-version"
 )
 
 // StatefulSet the StatefulSet service that knows how to interact with k8s to manage them
@@ -98,6 +103,15 @@ func (s *StatefulSetService) CreateOrUpdateStatefulSet(namespace string, statefu
 	// namespace is our spec(https://github.com/kubernetes/community/blob/master/contributors/devel/api-conventions.md#concurrency-control-and-consistency),
 	// we will replace the current namespace state.
 	statefulSet.ResourceVersion = storedStatefulSet.ResourceVersion
+
+	v, found := storedStatefulSet.ObjectMeta.Labels[statefulVersionNumberName]
+	if found {
+		i, err := strconv.Atoi(v)
+		if err == nil {
+			statefulSet.ObjectMeta.Labels[statefulVersionNumberName] = strconv.Itoa(i + 1)
+		}
+	}
+
 	return s.UpdateStatefulSet(namespace, statefulSet)
 }
 

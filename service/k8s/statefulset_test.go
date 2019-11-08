@@ -116,3 +116,110 @@ func TestStatefulSetServiceGetCreateOrUpdate(t *testing.T) {
 		})
 	}
 }
+
+func TestStatefulSetServiceVersion(t *testing.T) {
+	testns := "testns"
+	deployedVersionName := "deployment-version"
+	ssName := "teststatefulSet1"
+	tests := []struct {
+		name                string
+		statefulSet         *appsv1.StatefulSet
+		previousStatefulSet *appsv1.StatefulSet
+		getStatefulSet      *appsv1.StatefulSet
+	}{
+		{
+			name: "Version on creation",
+			statefulSet: &appsv1.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:            ssName,
+					ResourceVersion: "10",
+					Labels: map[string]string{
+						"onelabel":          "value",
+						deployedVersionName: "1",
+					},
+				},
+			},
+			getStatefulSet: &appsv1.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:            ssName,
+					ResourceVersion: "10",
+					Labels: map[string]string{
+						"onelabel":          "value",
+						deployedVersionName: "1",
+					},
+				},
+			},
+		},
+		{
+			name: "Version on update",
+			statefulSet: &appsv1.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:            ssName,
+					ResourceVersion: "10",
+					Labels: map[string]string{
+						"onelabel":          "value",
+						deployedVersionName: "1",
+					},
+				},
+			},
+			previousStatefulSet: &appsv1.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:            ssName,
+					ResourceVersion: "10",
+					Labels: map[string]string{
+						"onelabel":          "value",
+						deployedVersionName: "17",
+					},
+				},
+			},
+			getStatefulSet: &appsv1.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:            ssName,
+					ResourceVersion: "10",
+					Labels: map[string]string{
+						"onelabel":          "value",
+						deployedVersionName: "18",
+					},
+				},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert := assert.New(t)
+
+			internalStatefulSet := test.previousStatefulSet
+
+			// Mock.
+			mcli := &kubernetes.Clientset{}
+			mcli.AddReactor("get", "statefulsets", func(action kubetesting.Action) (bool, runtime.Object, error) {
+				if internalStatefulSet == nil {
+					return true, nil, kubeerrors.NewNotFound(schema.GroupResource{}, "")
+				}
+
+				return true, internalStatefulSet, nil
+			})
+
+			mcli.AddReactor("create", "statefulsets", func(action kubetesting.Action) (bool, runtime.Object, error) {
+				ss, _ := action.(kubetesting.CreateActionImpl)
+				internalStatefulSet = ss.GetObject().(*appsv1.StatefulSet)
+				return true, nil, nil
+			})
+
+			mcli.AddReactor("update", "statefulsets", func(action kubetesting.Action) (bool, runtime.Object, error) {
+				ss, _ := action.(kubetesting.UpdateActionImpl)
+				internalStatefulSet = ss.GetObject().(*appsv1.StatefulSet)
+				return true, nil, nil
+			})
+
+			service := k8s.NewStatefulSetService(mcli, log.Dummy)
+			err := service.CreateOrUpdateStatefulSet(testns, test.statefulSet)
+
+			assert.NoError(err)
+
+			ssDeployed, err := mcli.AppsV1().StatefulSets(testns).Get(ssName, metav1.GetOptions{})
+			assert.NoError(err)
+			assert.Equal(ssDeployed.ObjectMeta.Labels[deployedVersionName], test.getStatefulSet.ObjectMeta.Labels[deployedVersionName])
+		})
+	}
+}

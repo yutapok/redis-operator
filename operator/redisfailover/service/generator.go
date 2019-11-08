@@ -12,14 +12,15 @@ import (
 
 	redisfailoverv1 "github.com/spotahome/redis-operator/api/redisfailover/v1"
 	"github.com/spotahome/redis-operator/operator/redisfailover/util"
+	"github.com/spotahome/redis-operator/service/k8s"
 )
 
 const (
 	redisConfigurationVolumeName         = "redis-config"
 	redisShutdownConfigurationVolumeName = "redis-shutdown-config"
 	redisStorageVolumeName               = "redis-data"
-
-	graceTime = 30
+	graceTime                            = 30
+	stateuflVersionNumberDefault         = "1"
 )
 
 func generateSentinelService(rf *redisfailoverv1.RedisFailover, labels map[string]string, ownerRefs []metav1.OwnerReference) *corev1.Service {
@@ -166,6 +167,12 @@ func generateRedisStatefulSet(rf *redisfailoverv1.RedisFailover, labels map[stri
 	redisCommand := getRedisCommand(rf)
 	selectorLabels := generateSelectorLabels(redisRoleName, rf.Name)
 	labels = util.MergeLabels(labels, selectorLabels)
+	_, found := labels[statefulVersionNumberName]
+
+	if !found {
+		labels[k8s.statefulVersionNumberName] = stateuflVersionNumberDefault
+	}
+
 	volumeMounts := getRedisVolumeMounts(rf)
 	volumes := getRedisVolumes(rf)
 
@@ -180,7 +187,7 @@ func generateRedisStatefulSet(rf *redisfailoverv1.RedisFailover, labels map[stri
 			ServiceName: name,
 			Replicas:    &rf.Spec.Redis.Replicas,
 			UpdateStrategy: appsv1.StatefulSetUpdateStrategy{
-				Type: "RollingUpdate",
+				Type: "OnDelete",
 			},
 			Selector: &metav1.LabelSelector{
 				MatchLabels: selectorLabels,
@@ -191,9 +198,9 @@ func generateRedisStatefulSet(rf *redisfailoverv1.RedisFailover, labels map[stri
 					Annotations: rf.Spec.Redis.PodAnnotations,
 				},
 				Spec: corev1.PodSpec{
-					Affinity:        getAffinity(rf.Spec.Redis.Affinity, labels),
-					Tolerations:     rf.Spec.Redis.Tolerations,
-					SecurityContext: getSecurityContext(rf.Spec.Redis.SecurityContext),
+					Affinity:         getAffinity(rf.Spec.Redis.Affinity, labels),
+					Tolerations:      rf.Spec.Redis.Tolerations,
+					SecurityContext:  getSecurityContext(rf.Spec.Redis.SecurityContext),
 					ImagePullSecrets: rf.Spec.Redis.ImagePullSecrets,
 					Containers: []corev1.Container{
 						{
@@ -296,9 +303,9 @@ func generateSentinelDeployment(rf *redisfailoverv1.RedisFailover, labels map[st
 					Annotations: rf.Spec.Sentinel.PodAnnotations,
 				},
 				Spec: corev1.PodSpec{
-					Affinity:        getAffinity(rf.Spec.Sentinel.Affinity, labels),
-					Tolerations:     rf.Spec.Sentinel.Tolerations,
-					SecurityContext: getSecurityContext(rf.Spec.Sentinel.SecurityContext),
+					Affinity:         getAffinity(rf.Spec.Sentinel.Affinity, labels),
+					Tolerations:      rf.Spec.Sentinel.Tolerations,
+					SecurityContext:  getSecurityContext(rf.Spec.Sentinel.SecurityContext),
 					ImagePullSecrets: rf.Spec.Sentinel.ImagePullSecrets,
 					InitContainers: []corev1.Container{
 						{

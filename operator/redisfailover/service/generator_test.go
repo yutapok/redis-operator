@@ -651,3 +651,64 @@ func TestSentinelDeploymentPodAnnotations(t *testing.T) {
 		assert.NoError(err)
 	}
 }
+
+func TestRedisStatefulSetLabels(t *testing.T) {
+	tests := []struct {
+		name           string
+		givenLabels    map[string]string
+		expectedLabels map[string]string
+	}{
+		{
+			name: "No given labels",
+			expectedLabels: map[string]string{
+				"deployment-version":          "1",
+				"app.kubernetes.io/name":      "test",
+				"app.kubernetes.io/component": "redis",
+				"app.kubernetes.io/part-of":   "redis-failover",
+			},
+		},
+		{
+			name:        "Some given label",
+			givenLabels: map[string]string{"someotherlabel": "value"},
+			expectedLabels: map[string]string{
+				"someotherlabel":              "value",
+				"deployment-version":          "1",
+				"app.kubernetes.io/name":      "test",
+				"app.kubernetes.io/component": "redis",
+				"app.kubernetes.io/part-of":   "redis-failover",
+			},
+		},
+		{
+			name:        "No overwrite label",
+			givenLabels: map[string]string{"deployment-version": "10"},
+			expectedLabels: map[string]string{
+				"deployment-version":          "10",
+				"app.kubernetes.io/name":      "test",
+				"app.kubernetes.io/component": "redis",
+				"app.kubernetes.io/part-of":   "redis-failover",
+			},
+		},
+	}
+	for _, test := range tests {
+		assert := assert.New(t)
+
+		// Generate a default RedisFailover and attaching the required annotations
+		rf := generateRF()
+
+		gotPodLabels := map[string]string{}
+
+		ms := &mK8SService.Services{}
+		ms.On("CreateOrUpdatePodDisruptionBudget", namespace, mock.Anything).Once().Return(nil, nil)
+		ms.On("CreateOrUpdateStatefulSet", namespace, mock.Anything).Once().Run(func(args mock.Arguments) {
+			ss := args.Get(1).(*appsv1.StatefulSet)
+			gotPodLabels = ss.Spec.Template.ObjectMeta.Labels
+		}).Return(nil)
+
+		client := rfservice.NewRedisFailoverKubeClient(ms, log.Dummy)
+		err := client.EnsureRedisStatefulset(rf, test.givenLabels, []metav1.OwnerReference{})
+
+		assert.Equal(test.expectedLabels, gotPodLabels)
+		assert.NoError(err)
+
+	}
+}
