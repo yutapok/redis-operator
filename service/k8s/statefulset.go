@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	statefulVersionNumberName = "deployment-version"
+	StatefulVersionNumberName = "deployment-version"
 )
 
 // StatefulSet the StatefulSet service that knows how to interact with k8s to manage them
@@ -104,11 +104,11 @@ func (s *StatefulSetService) CreateOrUpdateStatefulSet(namespace string, statefu
 	// we will replace the current namespace state.
 	statefulSet.ResourceVersion = storedStatefulSet.ResourceVersion
 
-	v, found := storedStatefulSet.ObjectMeta.Labels[statefulVersionNumberName]
+	v, found := storedStatefulSet.ObjectMeta.Labels[StatefulVersionNumberName]
 	if found {
 		i, err := strconv.Atoi(v)
 		if err == nil {
-			statefulSet.ObjectMeta.Labels[statefulVersionNumberName] = strconv.Itoa(i + 1)
+			statefulSet.ObjectMeta.Labels[StatefulVersionNumberName] = strconv.Itoa(i + 1)
 		}
 	}
 

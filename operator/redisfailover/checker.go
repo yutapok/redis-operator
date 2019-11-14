@@ -11,6 +11,61 @@ const (
 	timeToPrepare = 2 * time.Minute
 )
 
+//Checks if the running version of pods are equal to the statefulset one
+func (r *RedisFailoverHandler) UpdateRedisesPods(rf *redisfailoverv1.RedisFailover) error {
+	redises, err := r.rfChecker.GetRedisesIPs(rf)
+	if err != nil {
+		return err
+	}
+
+	//If we have syincing nodes we finish checks
+	for _, rp := range redises {
+		sync, err := r.rfChecker.CheckRedisSyncing(rp, rf)
+		if err != nil {
+			return err
+		}
+		if sync {
+			//currently syncing, we wait next round
+			return nil
+		}
+	}
+
+	ssVersion, err := r.rfChecker.GetStatefulSetVersion(rf)
+	if err != nil {
+		return err
+	}
+
+	redisesPods, err := r.rfChecker.GetRedisesSlavesPods(rf)
+	if err != nil {
+		return err
+	}
+
+	//If some slaves are not in the correct version, delete them
+	for _, pod := range redisesPods {
+		podVersion, err := r.rfChecker.GetRedisVersion(pod, rf)
+		if err != nil {
+			return err
+		}
+		if podVersion != ssVersion {
+			//Delete pod and wait next round to check if the new one is synced
+			r.rfHealer.DeletePod(pod, rf)
+			return nil
+		}
+	}
+
+	//If all slaves are up and synced, we check master
+	master, err := r.rfChecker.GetRedisesMasterPod(rf)
+
+	masterVersion, err := r.rfChecker.GetRedisVersion(master, rf)
+	if masterVersion != ssVersion {
+		//Delete pod and wait next round to check if the new one is synced
+		r.rfHealer.DeletePod(master, rf)
+		return nil
+	}
+
+	return nil
+}
+
 func (r *RedisFailoverHandler) CheckAndHeal(rf *redisfailoverv1.RedisFailover) error {
 	// Number of redis is equal as the set on the RF spec
 	// Number of sentinel is equal as the set on the RF spec
@@ -85,6 +140,11 @@ func (r *RedisFailoverHandler) CheckAndHeal(rf *redisfailoverv1.RedisFailover) e
 		if err := r.rfHealer.SetRedisCustomConfig(rip, rf); err != nil {
 			return err
 		}
+	}
+
+	err = r.UpdateRedisesPods(rf)
+	if err != nil {
+		return err
 	}
 
 	sentinels, err := r.rfChecker.GetSentinelsIPs(rf)

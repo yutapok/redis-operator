@@ -26,6 +26,11 @@ type RedisFailoverCheck interface {
 	GetRedisesIPs(rFailover *redisfailoverv1.RedisFailover) ([]string, error)
 	GetSentinelsIPs(rFailover *redisfailoverv1.RedisFailover) ([]string, error)
 	GetMinimumRedisPodTime(rFailover *redisfailoverv1.RedisFailover) (time.Duration, error)
+	GetRedisesSlavesPods(rFailover *redisfailoverv1.RedisFailover) ([]string, error)
+	GetRedisesMasterPod(rFailover *redisfailoverv1.RedisFailover) (string, error)
+	GetStatefulSetVersion(rFailover *redisfailoverv1.RedisFailover) (string, error)
+	GetRedisVersion(podName string, rFailover *redisfailoverv1.RedisFailover) (string, error)
+	CheckRedisSyncing(slaveIP string, rFailover *redisfailoverv1.RedisFailover) (bool, error)
 }
 
 // RedisFailoverChecker is our implementation of RedisFailoverCheck interface
@@ -229,4 +234,117 @@ func (r *RedisFailoverChecker) GetMinimumRedisPodTime(rf *redisfailoverv1.RedisF
 		}
 	}
 	return minTime, nil
+}
+
+// GetRedisesSlavesPods returns pods names of the Redis slave nodes
+func (r *RedisFailoverChecker) GetRedisesSlavesPods(rf *redisfailoverv1.RedisFailover) ([]string, error) {
+	redises := []string{}
+	rps, err := r.k8sService.GetStatefulSetPods(rf.Namespace, GetRedisName(rf))
+	if err != nil {
+		return nil, err
+	}
+
+	password, err := k8s.GetRedisPassword(r.k8sService, rf)
+	if err != nil {
+		return redises, err
+	}
+
+	for _, rp := range rps.Items {
+		if rp.Status.Phase == corev1.PodRunning { // Only work with running
+			master, err := r.redisClient.IsMaster(rp.Status.PodIP, password)
+			if err != nil {
+				return []string{}, err
+			}
+			if !master {
+				redises = append(redises, rp.ObjectMeta.Name)
+			}
+		}
+	}
+	return redises, nil
+}
+
+// GetRedisesMasterPod returns pods names of the Redis slave nodes
+func (r *RedisFailoverChecker) GetRedisesMasterPod(rFailover *redisfailoverv1.RedisFailover) (string, error) {
+	rps, err := r.k8sService.GetStatefulSetPods(rFailover.Namespace, GetRedisName(rFailover))
+	if err != nil {
+		return "", err
+	}
+
+	password, err := k8s.GetRedisPassword(r.k8sService, rFailover)
+	if err != nil {
+		return "", err
+	}
+
+	for _, rp := range rps.Items {
+		if rp.Status.Phase == corev1.PodRunning { // Only work with running
+			master, err := r.redisClient.IsMaster(rp.Status.PodIP, password)
+			if err != nil {
+				return "", err
+			}
+			if master {
+				return rp.ObjectMeta.Name, nil
+			}
+		}
+	}
+	return "", errors.New("redis nodes known as master not found")
+}
+
+// GetStatefulSetVersion returns current version for the statefulSet
+// If the label don't exists, we return an empty value and no error, so previous versions don't break
+func (r *RedisFailoverChecker) GetStatefulSetVersion(rFailover *redisfailoverv1.RedisFailover) (string, error) {
+	ss, err := r.k8sService.GetStatefulSet(rFailover.Namespace, GetRedisName(rFailover))
+	if err != nil {
+		return "", err
+	}
+
+	if ss == nil {
+		return "", errors.New("statefulSet not found")
+	}
+
+	if ss.ObjectMeta.Labels == nil {
+		return "", nil
+	}
+
+	vn, found := ss.ObjectMeta.Labels[k8s.StatefulVersionNumberName]
+
+	if !found {
+		return "", nil
+	}
+
+	return vn, nil
+}
+
+// GetRedisVersion returns current version for the pod
+// If the label don't exists, we return an empty value and no error, so previous versions don't break
+func (r *RedisFailoverChecker) GetRedisVersion(podName string, rFailover *redisfailoverv1.RedisFailover) (string, error) {
+	pod, err := r.k8sService.GetPod(rFailover.Namespace, podName)
+	if err != nil {
+		return "", err
+	}
+
+	if pod == nil {
+		return "", errors.New("pod not found")
+	}
+
+	if pod.ObjectMeta.Labels == nil {
+		return "", nil
+	}
+
+	vn, found := pod.ObjectMeta.Labels[k8s.StatefulVersionNumberName]
+
+	if !found {
+		return "", nil
+	}
+
+	return vn, nil
+}
+
+// CheckRedisSyncing returns true if the slave is still syncing
+func (r *RedisFailoverChecker) CheckRedisSyncing(ip string, rFailover *redisfailoverv1.RedisFailover) (bool, error) {
+	password, err := k8s.GetRedisPassword(r.k8sService, rFailover)
+	if err != nil {
+		return false, err
+	}
+
+	return r.redisClient.IsSyncing(ip, password)
 }

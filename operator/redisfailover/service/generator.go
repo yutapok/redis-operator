@@ -167,10 +167,10 @@ func generateRedisStatefulSet(rf *redisfailoverv1.RedisFailover, labels map[stri
 	redisCommand := getRedisCommand(rf)
 	selectorLabels := generateSelectorLabels(redisRoleName, rf.Name)
 	labels = util.MergeLabels(labels, selectorLabels)
-	_, found := labels[statefulVersionNumberName]
+	_, found := labels[k8s.StatefulVersionNumberName]
 
 	if !found {
-		labels[k8s.statefulVersionNumberName] = stateuflVersionNumberDefault
+		labels[k8s.StatefulVersionNumberName] = stateuflVersionNumberDefault
 	}
 
 	volumeMounts := getRedisVolumeMounts(rf)
