@@ -87,8 +87,7 @@ func generateRedisService(rf *redisfailoverv1.RedisFailover, labels map[string]s
 			Annotations:     annotations,
 		},
 		Spec: corev1.ServiceSpec{
-			Type:      corev1.ServiceTypeClusterIP,
-			ClusterIP: corev1.ClusterIPNone,
+			Type: corev1.ServiceTypeLoadBalancer,
 			Ports: []corev1.ServicePort{
 				{
 					Port:     exporterPort,
